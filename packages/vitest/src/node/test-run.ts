@@ -32,9 +32,19 @@ import mime from 'mime/lite'
 import { basename, extname, resolve } from 'pathe'
 
 export class TestRun {
+  private shardedOut = new Set<TestSpecification>()
+
   constructor(private vitest: Vitest) {}
 
+  /** @internal */
+  excludeSpecifications(specifications: Iterable<TestSpecification>): void {
+    for (const spec of specifications) {
+      this.shardedOut.add(spec)
+    }
+  }
+
   async start(specifications: TestSpecification[]): Promise<void> {
+    this.shardedOut.clear()
     const filepaths = specifications.map((spec) => spec.moduleId)
     this.vitest.state.collectPaths(filepaths)
 
@@ -139,8 +149,12 @@ export class TestRun {
       await this.vitest.report('onCoverage', coverage)
     }
 
-    // specification won't have the File task if they were filtered by the --shard command
-    const modules = specifications.map((spec) => spec.testModule).filter((s) => s != null)
+    // with `experimental.preParse` the specifications filtered by --shard already have a File task,
+    // but they are never run, so they must not be reported as part of this run
+    const modules = specifications
+      .filter((spec) => !this.shardedOut.has(spec))
+      .map((spec) => spec.testModule)
+      .filter((s) => s != null)
 
     const state: TestRunEndReason = this.vitest.isCancelling
       ? 'interrupted'
